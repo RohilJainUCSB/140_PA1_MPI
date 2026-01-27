@@ -28,7 +28,27 @@ int global_sum(int my_int, int my_rank, int no_proc, MPI_Comm comm);
  */
 char *treesum_test1() {
   /* Your solution */
-  return "Not tested";
+  //Start by initializing the communicator, rank, and size
+  MPI_Comm comm = MPI_COMM_WORLD;
+  MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
+  MPI_Comm_size(MPI_COMM_WORLD, &no_proc);
+
+  //All 1 test
+  int result = global_sum(1, my_rank, no_proc, comm);
+  if(my_rank == 0) //Only want to test the return of the head process
+  {
+    //If the sum of all 1s isn't the number of processes, it failed
+    mu_assert("global_sum failed for all-ones test", result == no_proc);
+  }
+
+  //All given own rank value test
+  result = global_sum(my_rank, my_rank, no_proc, comm); 
+  int expected = no_proc * (no_proc - 1) / 2; //The arithmetic sum of 1 to no_proc
+  if(my_rank == 0)
+  { 
+    mu_assert("global_sum failed for rank-sum test", result == expected);
+  }
+  return NULL;
 }
 
 /*-------------------------------------------------------------------
