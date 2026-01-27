@@ -1,8 +1,8 @@
 /* File:
- *  mv_mult_mpi.c
+ *  itmv_mult_mpi.c
  *
  * Purpose:
- *  Implement parallel matrix-vector multiplication using
+ *  Implement parallel iterative matrix-vector multiplication using
  *  one-dimensional arrays to store the vectors and the
  *  matrix. Vectors use block distributions and the
  *  matrix is distributed by block rows.
@@ -30,6 +30,11 @@
 #include <stdlib.h>
 
 #define UPPER_TRIANGULAR 1
+#define FAIL 0
+#define SUCC 1
+
+#define procmap(i, r) ((int)floor((double)i / r))
+#define local(i, r) (i % r)
 
 /*-------------------------------------------------------------------
  * Function:
@@ -67,26 +72,63 @@
  * Global:
  *  This function should NOT access any global variable.
  */
-int itmv_mult(double local_A[] /* in */, double local_x[] /* in */,
-              double local_d[] /* in */, double local_y[] /* out */,
-              double global_x[] /* out */, int matrix_type /* in */,
-              int n /* in */, int t /* in */, int blocksize /* in */,
-              int my_rank /* in */, int no_proc /* in */,
-              MPI_Comm comm /* in */) {
+int itmv_mult(double local_A[], double local_x[],
+              double local_d[], double local_y[],
+              double global_x[], int matrix_type,
+              int n, int t, int blocksize,
+              int my_rank, int no_proc,
+              MPI_Comm comm) {
   double *x;
   int local_i, j, start, k;
   int succ, all_succ;
+  int global_i;
 
   if (n <= 0 || blocksize <= 0 || local_A == NULL || local_x == NULL ||
       local_y == NULL || no_proc <= 0 || my_rank < 0 || my_rank >= no_proc)
     return 0;
-  if (n % no_proc != 0) /* n is not divisible by no_proc */
+  if (n % no_proc != 0) 
     return 0;
-  if (n / no_proc != blocksize) /* wrong local array size */
+  if (n / no_proc != blocksize) 
     return 0;
 
-  /* Your solution */
+  x = malloc(n * sizeof(double));
+  succ = (x != NULL);
+  MPI_Allreduce(&succ, &all_succ, 1, MPI_INT, MPI_PROD, comm);
+  if (all_succ == 0) return 0;
 
+  for (k = 0; k < t; k++) {
+    MPI_Allgather(local_x, blocksize, MPI_DOUBLE, x, blocksize, MPI_DOUBLE, comm);
+
+    for (local_i = 0; local_i < blocksize; local_i++) {
+      global_i = my_rank * blocksize + local_i;
+      
+      local_y[local_i] = local_d[local_i];
+      
+      if (matrix_type == UPPER_TRIANGULAR) {
+        start = global_i;
+      } else {
+        start = 0;
+      }
+      
+      for (j = start; j < n; j++) {
+        local_y[local_i] += local_A[local_i * n + j] * x[j];
+      }
+    }
+    
+    
+    for (local_i = 0; local_i < blocksize; local_i++) {
+      local_x[local_i] = local_y[local_i];
+    }
+  }
+
+ 
+  if (my_rank == 0) {
+    MPI_Gather(local_x, blocksize, MPI_DOUBLE, global_x, blocksize, MPI_DOUBLE, 0, comm);
+  } else {
+    MPI_Gather(local_x, blocksize, MPI_DOUBLE, NULL, blocksize, MPI_DOUBLE, 0, comm);
+  }
+
+  free(x);
   return 1;
 }
 
