@@ -1,18 +1,3 @@
-/*
- * File:
- *  mv_mult_test_mpi.c
- *
- * Purpose:
- *  test matrix vector multiplication y=Ax.
- *  Matrix A is a square matrix of size nxn.
- *  Column vectors x and y are of size nx1
- *
- * Input test matrix:
- *  A[i][j]=c in all positions.
- *  y[i] is 0 in all positions x[i]= i for 0<=i<n For simplicity,
- *  we assume n is divisible by no_proc.
- */
-
 #include <math.h>
 #include <mpi.h>
 #include <stdio.h>
@@ -27,18 +12,18 @@ MPI_Comm comm;
 #define FAIL 0
 #define SUCC 1
 
-/*Block mapping functions*/
 #define procmap(i, r) ((int)floor((double)i / r))
 #define local(i, r) (i % r)
 
 #define TEST_CORRECTNESS 1
 #define UPPER_TRIANGULAR 1
-int itmv_mult(double local_A[] /* in */, double local_x[] /* in */,
-              double local_d[] /* in */, double local_y[] /* out */,
-              double global_x[] /* out */, int matrix_type /* in */,
-              int n /* in */, int t /* in */, int blocksize /* in */,
-              int my_rank /* in */, int no_proc /* in */,
-              MPI_Comm comm /* in */);
+
+int itmv_mult(double local_A[], double local_x[],
+              double local_d[], double local_y[],
+              double global_x[], int matrix_type,
+              int n, int t, int blocksize,
+              int my_rank, int no_proc,
+              MPI_Comm comm);
 
 int itmv_mult_seq(double A[], double x[], double d[], double y[],
                   int matrix_type, int n, int t);
@@ -51,20 +36,14 @@ void print_error(char *msgheader, char *msg) {
 
 void print_itmv_sample(char *msgheader, double A[], double x[], double d[],
                        double y[], int matrix_type, int n, int t) {
-  printf("%s Test matrix type %d, size n=%d, t=%d\n", msgheader, matrix_type, n,
-         t);
+  printf("%s Test matrix type %d, size n=%d, t=%d\n", msgheader, matrix_type, n, t);
   if (n < 4 || A == NULL || x == NULL || d == NULL || y == NULL) return;
   printf("%s check x[0-3] %f, %f, %f, %f\n", msgheader, x[0], x[1], x[2], x[3]);
-  printf("%s check d[0-3] are %f, %f, %f, %f\n", msgheader, d[0], d[1], d[2],
-         d[3]);
-  printf("%s check A[0][0-3] are %f, %f, %f, %f\n", msgheader, A[0], A[1], A[2],
-         A[3]);
-  printf("%s check A[1][0-3] are %f, %f, %f, %f\n", msgheader, A[n], A[n + 1],
-         A[n + 2], A[n + 3]);
-  printf("%s check A[2][0-3] are %f, %f, %f, %f\n", msgheader, A[2 * n],
-         A[2 * n + 1], A[2 * n + 2], A[2 * n + 3]);
-  printf("%s check A[3][0-3] are %f, %f, %f, %f\n", msgheader, A[3 * n],
-         A[3 * n + 1], A[3 * n + 2], A[3 * n + 3]);
+  printf("%s check d[0-3] are %f, %f, %f, %f\n", msgheader, d[0], d[1], d[2], d[3]);
+  printf("%s check A[0][0-3] are %f, %f, %f, %f\n", msgheader, A[0], A[1], A[2], A[3]);
+  printf("%s check A[1][0-3] are %f, %f, %f, %f\n", msgheader, A[n], A[n + 1], A[n + 2], A[n + 3]);
+  printf("%s check A[2][0-3] are %f, %f, %f, %f\n", msgheader, A[2 * n], A[2 * n + 1], A[2 * n + 2], A[2 * n + 3]);
+  printf("%s check A[3][0-3] are %f, %f, %f, %f\n", msgheader, A[3 * n], A[3 * n + 1], A[3 * n + 2], A[3 * n + 3]);
 }
 
 void print_itmv_sample_distributed(char *msgheader, double local_A[],
@@ -83,8 +62,7 @@ void print_itmv_sample_distributed(char *msgheader, double local_A[],
              msgheader, my_rank, i, local_i, local_x[local_i], i, local_i,
              local_d[local_i]);
       printf(
-          "%s Proc %d Row A[%d] locally A[%d] last 4 elements = %f, %f, %f, "
-          "%f\n",
+          "%s Proc %d Row A[%d] locally A[%d] last 4 elements = %f, %f, %f, %f\n",
           msgheader, my_rank, i, local_i, local_A[local_i * n + n - 4],
           local_A[local_i * n + n - 3], local_A[local_i * n + n - 2],
           local_A[local_i * n + n - 1]);
@@ -92,25 +70,6 @@ void print_itmv_sample_distributed(char *msgheader, double local_A[],
   }
 }
 
-/*----------------------------------------------------------------------------
- * Test if the t iterations of parallel computation {y=Ax;  x=y} matches the
- * expectation. If failed, return a message string showing the failed point If
- * successful, return NULL
- *
- * In args:
- *  global_x[] is the  array hosted at process 0 storing the final result;
- *  n is the number of columns (and rows);
- *  t is the number of iterations conducted;
- *  matrix_type being 0 means regular matrix;
- *  matrix_type being 1 (UPPER_TRIANGULAR) means upper triangular.
- *
- * Return:
- *  a column vector that contains the final result column vector y.
- *
- * Note:
- *  We test only for small n value, and thus we will simplly run
- *  sequential code to obtain the expected vector and then compare.
- */
 double *compute_expected(char *testmsg, int n, int t, int matrix_type) {
   int i, j, start;
   double *A, *x, *d, *y;
@@ -119,7 +78,7 @@ double *compute_expected(char *testmsg, int n, int t, int matrix_type) {
   x = malloc(n * sizeof(double));
   d = malloc(n * sizeof(double));
   y = malloc(n * sizeof(double));
-  /* Here we assume none of them are NULL. given a modest size n */
+  
   for (i = 0; i < n; i++) {
     x[i] = 0;
     d[i] = (2.0 * n - 1.0) / n;
@@ -166,25 +125,6 @@ char *validate_vect(char *msgheader, double global_x[], int n, int t,
   return NULL;
 }
 
-/*-------------------------------------------------------------------
- * Allocate storage space for each array at each processs.
- * If failed, 0
- * If successful, return 1
- *
- * In args:
- *  *local_A is the starting address of local space for matrix A
- *  with rowwise block mapping;
- *  *local_x is the starting address of local space for vector x
- *  with rowwise block mapping;
- *  *local_d is the starting address of local space for vector d
- *  with rowwise block mapping;
- *  *local_y is the starting address of local space for vector y;
- *  with rowwise block mapping;
- *  *global_x is the starting address of space for vector x
- *  with size n blocksize is the size of local array;
- *  n is the number of columns (and rows).
- */
-
 int allocate_space(double **local_A, double **local_x, double **local_d,
                    double **local_y, double **global_x, int blocksize, int n) {
   int succ = 1, all_succ = 1;
@@ -194,11 +134,9 @@ int allocate_space(double **local_A, double **local_x, double **local_d,
   *local_d = malloc(blocksize * sizeof(double));
   *local_y = malloc(blocksize * sizeof(double));
   *global_x = malloc(n * sizeof(double));
-  /* Here we assume none of them are NULL. A more robust program needs to
-     check the failed memory allocation */
+  
   if (*local_A == NULL || *local_x == NULL || *local_d == NULL ||
       *local_y == NULL || *global_x == NULL) {
-    /* Find an error, thus we release space first */
     if (*local_A != NULL) free(*local_A);
     if (*local_x != NULL) free(*local_x);
     if (*local_d != NULL) free(*local_d);
@@ -206,73 +144,61 @@ int allocate_space(double **local_A, double **local_x, double **local_d,
     if (*global_x != NULL) free(*global_x);
     succ = 0;
   }
-  /* All processes synchronize to check if there is any failure in allocation
-   */
+  
   MPI_Allreduce(&succ, &all_succ, 1, MPI_INT, MPI_PROD, comm);
   return all_succ;
 }
 
-/*-------------------------------------------------------------------
- * Initialize test matrix and vectors distributed at each processs.
- *    vector x of size n: 0 for every element
- *    vector d of size n: (2n-1)/n for every element
- *
- * When matrix_type is not UPPER_TRIANGULAR, matrix A of size nxn:
- *    A[i,i]=0 for diagnal elements. A[i,j]=-1/n for non-diagonal elements.
- * When matrix_type is UPPER_TRIANGULAR matrix  A of size nxn:
- *    A[i,i]=0 for diagnal elements. A[i,j]=-1/n for upper diagonal elements
- *    with i<j all lower triangular elements are 0
- *
- * In args:
- *  *local_A is the starting address of local space for matrix A
- *  with rowwise block mapping, # of rows=blocksize;
- *  *local_x is the starting address of local space for vector x
- *  with rowwise block mapping, # of elements=blocksize;
- *  *local_d is the starting address of local space for vector d
- *  with rowwise block mapping, # of elements=blocksize;
- *  *local_y is the starting address of local space for vector y
- *  with rowwise block mapping, # of elements=blocksize;
- *  blocksize is the size of local array;
- *  n is the number of columns (and rows);
- *  marix_type: matrix type UPP_TRIANGULAR means A is upper triangular
- *  otherwise just reguar square matrix;
- *  my_rank: my process ID (started from 0);
- *
- * Return value:
- *  If failed, return FAIL (0); If successful, return 1 (SUCC)
- *
- * Global variable: This function should NOT use any global variable
- */
 int init_matrix(double *local_A, double *local_x, double *local_d,
                 double *local_y, int blocksize, int n, int matrix_type,
                 int my_rank) {
+  int local_i, j, global_i;
+  
   if (local_A == NULL || local_x == NULL || local_d == NULL ||
       local_y == NULL || blocksize <= 0)
     return FAIL;
 
-  /* Your solution */
+  for (local_i = 0; local_i < blocksize; local_i++) {
+    local_x[local_i] = 0.0;
+    local_d[local_i] = (2.0 * n - 1.0) / n;
+    local_y[local_i] = 0.0;
+  }
+
+  for (local_i = 0; local_i < blocksize; local_i++) {
+    global_i = my_rank * blocksize + local_i;
+    
+    for (j = 0; j < n; j++) {
+      if (global_i == j) {
+        local_A[local_i * n + j] = 0.0;
+      } else {
+        if (matrix_type == UPPER_TRIANGULAR) {
+          if (j > global_i) {
+            local_A[local_i * n + j] = -1.0 / n;
+          } else {
+            local_A[local_i * n + j] = 0.0;
+          }
+        } else {
+          local_A[local_i * n + j] = -1.0 / n;
+        }
+      }
+    }
+  }
+
   return SUCC;
 }
 
-/*-------------------------------------------------------------------
- * Test matrix vector multiplication
- * Process 0 collects the  error detection. If failed, return a message string
- * If successful, return NULL
- */
 char *itmv_test(char *testmsg, int test_correctness, int n, int matrix_type,
                 int t) {
   double startwtime = 0, endwtime = 0;
   double *local_A, *local_x, *local_d, *local_y, *global_x;
-  int succ, all_succ, blocksize, i, j, local_i, start;
+  int succ, blocksize;
   char *msg;
 
-  blocksize = n / no_proc; /* n is divisible by no_proc by assunmption */
+  blocksize = n / no_proc;
   succ = allocate_space(&local_A, &local_x, &local_d, &local_y, &global_x,
                         blocksize, n);
-  if (succ == 0) { /* one of processes failed in memory
-                      allocation */
+  if (succ == 0) {
     msg = "Failed space allocation";
-
     print_error(testmsg, msg);
     return msg;
   }
@@ -288,20 +214,20 @@ char *itmv_test(char *testmsg, int test_correctness, int n, int matrix_type,
 
   succ = itmv_mult(local_A, local_x, local_d, local_y, global_x, matrix_type, n,
                    t, blocksize, my_rank, no_proc, comm);
-  if (succ == 0) { /* one of processes failed in computing */
+  if (succ == 0) {
     msg = "Failed matrix multiplication";
     print_error(testmsg, msg);
     return msg;
   }
   if (my_rank == 0) {
     endwtime = MPI_Wtime();
-    double latency=endwtime-startwtime;
-    double gflops = (double) 2*n*n*t/1e9;
-    if (matrix_type== UPPER_TRIANGULAR)
-           gflops = (double) n*(n+1)*t/1e9;
-    gflops= gflops/latency;
-    printf("%s: Latency = %f sec at Proc 0 of %d processes. %.4f GFLOPS. Matrix dimension %d \n", testmsg,
-           latency,  no_proc, gflops,n);
+    double latency = endwtime - startwtime;
+    double gflops = (double) 2 * n * n * t / 1e9;
+    if (matrix_type == UPPER_TRIANGULAR)
+      gflops = (double) n * (n + 1) * t / 1e9;
+    gflops = gflops / latency;
+    printf("%s: Latency = %f sec at Proc 0 of %d processes. %.4f GFLOPS. Matrix dimension %d \n", 
+           testmsg, latency, no_proc, gflops, n);
   }
   msg = NULL;
   if (test_correctness == TEST_CORRECTNESS) {
@@ -315,8 +241,7 @@ char *itmv_test(char *testmsg, int test_correctness, int n, int matrix_type,
   free(local_y);
   free(local_d);
   free(global_x);
-  return msg; /* Only process 0 conducts correctness test,
-                 and prints summary report */
+  return msg;
 }
 
 char *itmv_test1() {
@@ -381,9 +306,6 @@ char *itmv_test14() {
                    UPPER_TRIANGULAR, 1024);
 }
 
-/*-------------------------------------------------------------------
- * Run all tests.  Ignore returned messages.
- */
 void run_all_tests(void) {
   mu_run_test(itmv_test1);
   mu_run_test(itmv_test2);
@@ -393,15 +315,10 @@ void run_all_tests(void) {
   mu_run_test(itmv_test6);
   mu_run_test(itmv_test7);
   mu_run_test(itmv_test8);
-  /* mu_run_test(itmv_test9); mu_run_test(itmv_test10);
-     mu_run_test(itmv_test11); mu_run_test(itmv_test12);
-     mu_run_test(itmv_test13); mu_run_test(itmv_test14); */
+  mu_run_test(itmv_test11);
+  mu_run_test(itmv_test12);
 }
 
-/*-------------------------------------------------------------------
- * The main entrance to run all tests.
- * Only Proc 0 prints the test summary
- */
 void testmain() {
   comm = MPI_COMM_WORLD;
   MPI_Comm_size(comm, &no_proc);
